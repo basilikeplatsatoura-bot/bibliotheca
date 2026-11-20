@@ -1,34 +1,8 @@
-import type { Book, BookPayload, CategoryCount } from '../types';
+import { supabase } from '../lib/supabase';
 import { INITIAL_BOOKS } from '../data/initialBooks';
+import type { Book, BookPayload, CategoryCount, Profile } from '../types';
 
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5005/api';
-const STORAGE_KEY = 'bibliotheca_books_v1';
-
-const isLocalHost =
-  typeof window !== 'undefined' &&
-  (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-let useLocalMode = !isLocalHost;
-
-function readLocalBooks(): Book[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {
-    // ignore corrupted storage
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(INITIAL_BOOKS));
-  return [...INITIAL_BOOKS];
-}
-
-function writeLocalBooks(books: Book[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(books));
-}
-
-function computeCategories(books: Book[]): CategoryCount[] {
+export function computeCategories(books: Book[]): CategoryCount[] {
   const counts = new Map<string, number>();
   for (const b of books) {
     const cat = b.category || 'Παγκόσμια Λογοτεχνία';
@@ -39,126 +13,213 @@ function computeCategories(books: Book[]): CategoryCount[] {
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, 'el'));
 }
 
-async function handleResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || fallbackMessage);
-  }
-  return response.json();
-}
-
 export const api = {
-  getBooks: async (params?: {
-    search?: string;
-    category?: string;
-    status?: string;
-    favorite?: boolean;
-  }): Promise<Book[]> => {
-    if (!useLocalMode) {
-      try {
-        const qs = new URLSearchParams();
-        if (params?.search?.trim()) qs.set('search', params.search.trim());
-        if (params?.category?.trim()) qs.set('category', params.category.trim());
-        if (params?.status?.trim()) qs.set('status', params.status.trim());
-        if (params?.favorite) qs.set('favorite', 'true');
-        const query = qs.toString() ? `?${qs.toString()}` : '';
-        const response = await fetch(`${BASE_URL}/books${query}`);
-        return await handleResponse<Book[]>(response, 'Αποτυχία φόρτωσης βιβλίων');
-      } catch {
-        // Fallback smoothly to offline local storage if backend is unreachable
-        useLocalMode = true;
-      }
-    }
-
-    let books = readLocalBooks();
-    if (params?.category?.trim()) {
-      books = books.filter((b) => b.category === params.category?.trim());
-    }
-    if (params?.status?.trim()) {
-      books = books.filter((b) => b.status === params.status?.trim());
-    }
-    if (params?.favorite) {
-      books = books.filter((b) => b.is_favorite);
-    }
-    if (params?.search?.trim()) {
-      const q = params.search.trim().toLowerCase();
-      books = books.filter(
-        (b) =>
-          b.title.toLowerCase().includes(q) ||
-          b.author.toLowerCase().includes(q) ||
-          (b.notes || '').toLowerCase().includes(q)
-      );
-    }
-    return books;
+  // ===== Auth & Profile =====
+  getProfile: async (userId: string): Promise<Profile | null> => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return data;
   },
 
-  getCategories: async (): Promise<CategoryCount[]> => {
-    if (!useLocalMode) {
-      try {
-        const response = await fetch(`${BASE_URL}/categories`);
-        return await handleResponse<CategoryCount[]>(response, 'Αποτυχία φόρτωσης κατηγοριών');
-      } catch {
-        useLocalMode = true;
-      }
-    }
-    return computeCategories(readLocalBooks());
+  ensureProfile: async (
+    userId: string,
+    usernameHint: string,
+    displayNameHint?: string
+  ): Promise<Profile> => {
+    const existing = await api.getProfile(userId);
+    if (existing) return existing;
+
+    const cleanBase =
+      usernameHint
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '')
+        .slice(0, 18) || 'reader';
+    const uniqueUsername = `${cleanBase}_${userId.slice(0, 4)}`;
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .insert({
+        id: userId,
+        username: uniqueUsername,
+        display_name: displayNameHint || usernameHint || 'Αναγνώστης',
+        bio: '',
+      })
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+    return data;
   },
 
-  createBook: async (book: BookPayload): Promise<{ message: string; book: Book }> => {
-    if (!useLocalMode) {
-      try {
-        const response = await fetch(`${BASE_URL}/books`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(book),
-        });
-        return await handleResponse(response, 'Αποτυχία προσθήκης βιβλίου');
-      } catch {
-        useLocalMode = true;
-      }
-    }
+  createProfile: async (
+    userId: string,
+    username: string,
+    displayName: string
+  ): Promise<Profile> => {
+    const cleanUsername = username.trim().toLowerCase().replace(/^@+/, '');
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert({
+        id: userId,
+        username: cleanUsername,
+        display_name: displayName.trim() || cleanUsername,
+        bio: '',
+      })
+      .select()
+      .single();
 
-    const books = readLocalBooks();
-    const maxId = books.reduce((m, b) => Math.max(m, b.id), 0);
-    const created: Book = { ...book, id: maxId + 1 };
-    writeLocalBooks([created, ...books]);
-    return { message: 'Το βιβλίο προστέθηκε με επιτυχία', book: created };
+    if (error) {
+      if (error.code === '23505') {
+        throw new Error('Αυτό το username χρησιμοποιείται ήδη. Διάλεξε ένα άλλο!');
+      }
+      throw new Error(error.message);
+    }
+    return data;
   },
 
-  updateBook: async (bookId: number, book: BookPayload): Promise<{ message: string; book: Book }> => {
-    if (!useLocalMode) {
-      try {
-        const response = await fetch(`${BASE_URL}/books/${bookId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(book),
-        });
-        return await handleResponse(response, 'Αποτυχία ενημέρωσης βιβλίου');
-      } catch {
-        useLocalMode = true;
-      }
-    }
-
-    const books = readLocalBooks();
-    const updated: Book = { ...book, id: bookId };
-    writeLocalBooks(books.map((b) => (b.id === bookId ? updated : b)));
-    return { message: 'Το βιβλίο ενημερώθηκε με επιτυχία', book: updated };
+  // ===== Books CRUD =====
+  getUserBooks: async (userId: string): Promise<Book[]> => {
+    const { data, error } = await supabase
+      .from('books')
+      .select('*')
+      .eq('user_id', userId)
+      .order('id', { ascending: false });
+    if (error) throw new Error('Αποτυχία φόρτωσης βιβλίων: ' + error.message);
+    return (data || []) as Book[];
   },
 
-  deleteBook: async (bookId: number): Promise<{ message: string }> => {
-    if (!useLocalMode) {
-      try {
-        const response = await fetch(`${BASE_URL}/books/${bookId}`, {
-          method: 'DELETE',
-        });
-        return await handleResponse(response, 'Αποτυχία διαγραφής βιβλίου');
-      } catch {
-        useLocalMode = true;
-      }
+  createBook: async (userId: string, book: BookPayload): Promise<Book> => {
+    const { data, error } = await supabase
+      .from('books')
+      .insert({
+        user_id: userId,
+        title: book.title,
+        author: book.author,
+        category: book.category,
+        status: book.status,
+        rating: book.rating,
+        is_favorite: book.is_favorite,
+        notes: book.notes,
+        cover_url: book.cover_url,
+      })
+      .select()
+      .single();
+    if (error) throw new Error('Αποτυχία προσθήκης βιβλίου: ' + error.message);
+    return data as Book;
+  },
+
+  updateBook: async (bookId: number, book: BookPayload): Promise<Book> => {
+    const { data, error } = await supabase
+      .from('books')
+      .update({
+        title: book.title,
+        author: book.author,
+        category: book.category,
+        status: book.status,
+        rating: book.rating,
+        is_favorite: book.is_favorite,
+        notes: book.notes,
+        cover_url: book.cover_url,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', bookId)
+      .select()
+      .single();
+    if (error) throw new Error('Αποτυχία ενημέρωσης βιβλίου: ' + error.message);
+    return data as Book;
+  },
+
+  deleteBook: async (bookId: number): Promise<void> => {
+    const { error } = await supabase.from('books').delete().eq('id', bookId);
+    if (error) throw new Error('Αποτυχία διαγραφής βιβλίου: ' + error.message);
+  },
+
+  importMyCollection: async (userId: string): Promise<number> => {
+    const rows = INITIAL_BOOKS.map((b) => ({
+      user_id: userId,
+      title: b.title,
+      author: b.author,
+      category: b.category,
+      status: b.status,
+      rating: b.rating,
+      is_favorite: b.is_favorite,
+      notes: b.notes,
+      cover_url: b.cover_url,
+    }));
+    const { error } = await supabase.from('books').insert(rows);
+    if (error) throw new Error('Αποτυχία εισαγωγής συλλογής: ' + error.message);
+    return rows.length;
+  },
+
+  // ===== Social: Profiles, Follows & Feed =====
+  searchProfiles: async (query: string, excludeUserId?: string): Promise<Profile[]> => {
+    let req = supabase
+      .from('profiles')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    const q = query.trim().replace(/^@+/, '');
+    if (q) {
+      req = req.or(`username.ilike.%${q}%,display_name.ilike.%${q}%`);
+    }
+    if (excludeUserId) {
+      req = req.neq('id', excludeUserId);
     }
 
-    const books = readLocalBooks();
-    writeLocalBooks(books.filter((b) => b.id !== bookId));
-    return { message: 'Το βιβλίο διαγράφηκε με επιτυχία' };
+    const { data, error } = await req;
+    if (error) throw new Error(error.message);
+    return (data || []) as Profile[];
+  },
+
+  getFollowStats: async (
+    userId: string
+  ): Promise<{ followingIds: string[]; followersCount: number; followingCount: number }> => {
+    const [followingRes, followersRes] = await Promise.all([
+      supabase.from('follows').select('following_id').eq('follower_id', userId),
+      supabase
+        .from('follows')
+        .select('follower_id', { count: 'exact', head: true })
+        .eq('following_id', userId),
+    ]);
+
+    const followingIds = (followingRes.data || []).map((r) => r.following_id as string);
+    return {
+      followingIds,
+      followingCount: followingIds.length,
+      followersCount: followersRes.count || 0,
+    };
+  },
+
+  followUser: async (myUserId: string, targetUserId: string): Promise<void> => {
+    const { error } = await supabase
+      .from('follows')
+      .insert({ follower_id: myUserId, following_id: targetUserId });
+    if (error && error.code !== '23505') throw new Error(error.message);
+  },
+
+  unfollowUser: async (myUserId: string, targetUserId: string): Promise<void> => {
+    const { error } = await supabase
+      .from('follows')
+      .delete()
+      .eq('follower_id', myUserId)
+      .eq('following_id', targetUserId);
+    if (error) throw new Error(error.message);
+  },
+
+  getFollowingFeed: async (followingIds: string[]): Promise<Book[]> => {
+    if (followingIds.length === 0) return [];
+    const { data, error } = await supabase
+      .from('books')
+      .select('*, profile:profiles(*)')
+      .in('user_id', followingIds)
+      .order('updated_at', { ascending: false })
+      .limit(40);
+    if (error) throw new Error(error.message);
+    return (data || []) as Book[];
   },
 };

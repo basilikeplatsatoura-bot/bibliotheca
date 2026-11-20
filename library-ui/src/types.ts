@@ -1,7 +1,16 @@
 export type BookStatus = 'want_to_read' | 'reading' | 'read';
 
+export interface Profile {
+  id: string;
+  username: string;
+  display_name: string;
+  bio: string;
+  created_at?: string;
+}
+
 export interface Book {
   id: number;
+  user_id?: string;
   title: string;
   author: string;
   category: string;
@@ -10,6 +19,9 @@ export interface Book {
   is_favorite: boolean;
   notes: string;
   cover_url: string;
+  created_at?: string;
+  updated_at?: string;
+  profile?: Profile;
 }
 
 export interface BookPayload {

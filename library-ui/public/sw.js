@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bibliotheca-v3';
+const CACHE_NAME = 'bibliotheca-v4';
 
 self.addEventListener('install', (event) => {
   event.waitUntil(

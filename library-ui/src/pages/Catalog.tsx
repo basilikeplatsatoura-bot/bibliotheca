@@ -20,6 +20,7 @@ import {
 } from '../components/Icons';
 
 interface CatalogProps {
+  userId: string;
   books: Book[];
   categories: CategoryCount[];
   loading: boolean;
@@ -27,6 +28,8 @@ interface CatalogProps {
   activeShelf: ShelfFilter;
   activeCategory: string;
   createTrigger: number;
+  importingCollection: boolean;
+  onImportCollection: () => Promise<void>;
   onSelectShelf: (shelf: ShelfFilter) => void;
   onSelectCategory: (catName: string) => void;
   onRefresh: () => Promise<void>;
@@ -46,6 +49,7 @@ const SHELF_TITLES: Record<ShelfFilter, string> = {
 };
 
 export const Catalog: React.FC<CatalogProps> = ({
+  userId,
   books,
   categories,
   loading,
@@ -53,6 +57,8 @@ export const Catalog: React.FC<CatalogProps> = ({
   activeShelf,
   activeCategory,
   createTrigger,
+  importingCollection,
+  onImportCollection,
   onSelectShelf,
   onSelectCategory,
   onRefresh,
@@ -138,7 +144,7 @@ export const Catalog: React.FC<CatalogProps> = ({
         await api.updateBook(editingBook.id, payload);
         onNotify(`Το βιβλίο «${payload.title}» ενημερώθηκε.`);
       } else {
-        await api.createBook(payload);
+        await api.createBook(userId, payload);
         onNotify(`Το βιβλίο «${payload.title}» προστέθηκε στη βιβλιοθήκη σου.`);
       }
       setBookModalOpen(false);
@@ -407,11 +413,31 @@ export const Catalog: React.FC<CatalogProps> = ({
 
       {!loading && !error && filteredBooks.length === 0 && (
         <div className="empty-state">
-          <p>
-            {activeShelf === 'reviews'
+          <p style={{ marginBottom: books.length === 0 ? '1.15rem' : 0 }}>
+            {books.length === 0
+              ? 'Η βιβλιοθήκη σου είναι ακόμα άδεια! Πρόσθεσε το πρώτο σου βιβλίο ή εισήγαγε την αρχική συλλογή.'
+              : activeShelf === 'reviews'
               ? 'Δεν έχεις γράψει ακόμα κάποιο σχόλιο ή βαθμολογία. Πάτησε πάνω σε ένα βιβλίο για να ξεκινήσεις!'
               : 'Δεν βρέθηκαν βιβλία σε αυτή την κατηγορία ή αναζήτηση.'}
           </p>
+          {books.length === 0 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn-white" onClick={handleOpenCreate}>
+                <PlusIcon size={15} />
+                <span>Προσθήκη Βιβλίου</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-violet"
+                disabled={importingCollection}
+                onClick={onImportCollection}
+              >
+                {importingCollection
+                  ? 'Εισαγωγή...'
+                  : 'Εισαγωγή της αρχικής συλλογής (67 βιβλία)'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
