@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { Book, BookPayload, BookStatus } from '../types';
 import { BOOK_CATEGORIES, STATUS_LABELS } from '../constants';
-import { CloseIcon, SearchIcon, StarIcon, TrashIcon } from './Icons';
+import { POPULAR_BOOKS, type PopularBookSuggestion } from '../data/popularBooks';
+import { BookOpenIcon, CloseIcon, SearchIcon, StarIcon, TrashIcon } from './Icons';
 
 interface BookModalProps {
   open: boolean;
@@ -9,6 +10,39 @@ interface BookModalProps {
   submitting: boolean;
   onClose: () => void;
   onSubmit: (payload: BookPayload) => void;
+}
+
+function normalizeGreek(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+async function searchOnlineSuggestions(query: string): Promise<PopularBookSuggestion[]> {
+  try {
+    const res = await fetch(
+      `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&media=ebook&country=gr&limit=5`
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const results: PopularBookSuggestion[] = [];
+    for (const item of data.results || []) {
+      if (!item.trackName || !item.artistName) continue;
+      results.push({
+        title: item.trackName,
+        author: item.artistName,
+        category: BOOK_CATEGORIES[0],
+        cover_url: item.artworkUrl100
+          ? item.artworkUrl100.replace('100x100bb', '600x600bb')
+          : undefined,
+      });
+    }
+    return results;
+  } catch {
+    return [];
+  }
 }
 
 async function lookupBookCover(title: string, author: string): Promise<string | null> {
@@ -66,8 +100,15 @@ export const BookModal: React.FC<BookModalProps> = ({
   const [searchingCover, setSearchingCover] = useState(false);
   const [coverHint, setCoverHint] = useState<string | null>(null);
 
+  // Autocomplete suggestions state
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [onlineSuggestions, setOnlineSuggestions] = useState<PopularBookSuggestion[]>([]);
+  const [loadingOnline, setLoadingOnline] = useState(false);
+
   useEffect(() => {
     setCoverHint(null);
+    setShowSuggestions(false);
+    setOnlineSuggestions([]);
     if (editingBook) {
       setTitle(editingBook.title);
       setAuthor(editingBook.author);
@@ -89,7 +130,60 @@ export const BookModal: React.FC<BookModalProps> = ({
     }
   }, [editingBook, open]);
 
+  // Instant local matches from curated popular books database
+  const localSuggestions = useMemo(() => {
+    if (editingBook) return [];
+    const q = normalizeGreek(title);
+    if (q.length < 2) return [];
+    return POPULAR_BOOKS.filter(
+      (b) => normalizeGreek(b.title).includes(q) || normalizeGreek(b.author).includes(q)
+    ).slice(0, 6);
+  }, [title, editingBook]);
+
+  // Live online suggestions (debounced) for millions of additional books
+  useEffect(() => {
+    if (!open || editingBook || !showSuggestions) return;
+    const trimmed = title.trim();
+    if (trimmed.length < 3) {
+      setOnlineSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      setLoadingOnline(true);
+      const found = await searchOnlineSuggestions(trimmed);
+      if (!cancelled) {
+        setOnlineSuggestions(found);
+        setLoadingOnline(false);
+      }
+    }, 380);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [title, open, editingBook, showSuggestions]);
+
+  // Merge local + online suggestions without duplicates
+  const mergedSuggestions = useMemo(() => {
+    const seen = new Set(localSuggestions.map((b) => normalizeGreek(b.title)));
+    const extra = onlineSuggestions.filter((b) => !seen.has(normalizeGreek(b.title))).slice(0, 4);
+    return [...localSuggestions, ...extra];
+  }, [localSuggestions, onlineSuggestions]);
+
   if (!open) return null;
+
+  const handleSelectSuggestion = (item: PopularBookSuggestion) => {
+    setTitle(item.title);
+    setAuthor(item.author);
+    if (item.category) setCategory(item.category);
+    if (item.cover_url) {
+      setCoverUrl(item.cover_url);
+      setCoverHint('Συμπληρώθηκε αυτόματα από τη βάση βιβλίων!');
+    }
+    setShowSuggestions(false);
+  };
 
   const handleAutoFindCover = async () => {
     if (!title.trim()) {
@@ -104,7 +198,7 @@ export const BookModal: React.FC<BookModalProps> = ({
       setCoverUrl(found);
       setCoverHint('Βρέθηκε πραγματικό εξώφυλλο!');
     } else {
-      setCoverHint('Δεν βρέθηκε αυτόματα — μπορείς να επικολλήσεις URL ή να διαλέξεις ένα προεπιλεγμένο.');
+      setCoverHint('Δεν βρέθηκε αυτόματα — μπορείς να επικολλήσεις URL ή να το αφήσεις κενό.');
     }
   };
 
@@ -136,20 +230,56 @@ export const BookModal: React.FC<BookModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
+          <div className="form-group autocomplete-wrap">
             <label className="form-label" htmlFor="book-title">
-              Τίτλος Βιβλίου *
+              Τίτλος Βιβλίου * {!editingBook && <span className="label-sub">(γράψε για προτάσεις)</span>}
             </label>
             <input
               id="book-title"
               type="text"
               className="input-field input-rect"
-              placeholder="π.χ. Το Τρίτο Στεφάνι"
+              placeholder="π.χ. 1984, Έγκλημα και Τιμωρία, Καζαντζάκης..."
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (!editingBook) setShowSuggestions(true);
+              }}
+              onFocus={() => {
+                if (!editingBook && title.trim().length >= 2) setShowSuggestions(true);
+              }}
+              autoComplete="off"
               required
               autoFocus
             />
+
+            {!editingBook && showSuggestions && (mergedSuggestions.length > 0 || loadingOnline) && (
+              <div className="suggestions-dropdown" role="listbox">
+                {mergedSuggestions.map((item, idx) => (
+                  <button
+                    key={`${item.title}-${item.author}-${idx}`}
+                    type="button"
+                    className="suggestion-item"
+                    onClick={() => handleSelectSuggestion(item)}
+                  >
+                    {item.cover_url ? (
+                      <img src={item.cover_url} alt="" className="suggestion-thumb" />
+                    ) : (
+                      <span className="suggestion-thumb suggestion-thumb-empty">
+                        <BookOpenIcon size={15} />
+                      </span>
+                    )}
+                    <div className="suggestion-info">
+                      <span className="suggestion-title">{item.title}</span>
+                      <span className="suggestion-author">{item.author}</span>
+                    </div>
+                    <span className="suggestion-cat">{item.category}</span>
+                  </button>
+                ))}
+                {loadingOnline && (
+                  <div className="suggestion-loading">Αναζήτηση επιπλέον βιβλίων...</div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="form-group">
