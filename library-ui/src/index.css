@@ -2306,3 +2306,88 @@ body,
     font-size: 1.5rem;
   }
 }
+
+/* ===== Native iPhone Bottom Tab Bar ===== */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  /* Hide top nav pills on mobile since bottom tab bar handles navigation */
+  .sidebar .sidebar-section {
+    display: none;
+  }
+
+  /* Leave room at the bottom so content never hides behind bottom tab bar */
+  .main-workspace {
+    padding-bottom: calc(5.5rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  .toast-container {
+    bottom: calc(5.25rem + env(safe-area-inset-bottom, 0px));
+    left: 1rem;
+    right: 1rem;
+    align-items: center;
+  }
+
+  .mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-items: center;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 55;
+    background: rgba(0, 20, 44, 0.92);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.45rem 0.4rem calc(0.5rem + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 28px rgba(0, 8, 22, 0.55);
+  }
+
+  .bottom-tab {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.22rem;
+    padding: 0.3rem 0.2rem;
+    font-size: 0.66rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease, transform 0.15s ease;
+  }
+
+  .bottom-tab.active {
+    color: #a792ff;
+  }
+
+  .bottom-tab.active svg {
+    filter: drop-shadow(0 0 8px rgba(124, 92, 255, 0.6));
+  }
+
+  .bottom-tab-add {
+    width: 46px;
+    height: 46px;
+    margin: -14px auto 0;
+    border: none;
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, var(--violet) 0%, #5b3df5 100%);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(124, 92, 255, 0.55), 0 0 0 3px rgba(0, 20, 44, 0.95);
+    transition: transform 0.15s ease;
+  }
+
+  .bottom-tab-add:active {
+    transform: scale(0.93);
+  }
+}

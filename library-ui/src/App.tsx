@@ -398,6 +398,65 @@ export function App() {
       </main>
 
       <ToastContainer toasts={toasts} />
+
+      {/* Native-style Bottom Tab Bar for Mobile / iPhone */}
+      <nav className="mobile-bottom-nav" aria-label="Κάτω πλοήγηση κινητού">
+        <button
+          type="button"
+          className={`bottom-tab ${
+            mainView === 'library' && activeShelf !== 'favorites' && activeShelf !== 'reviews'
+              ? 'active'
+              : ''
+          }`}
+          onClick={() => handleSelectShelf('all')}
+        >
+          <CompassIcon size={20} />
+          <span>Βιβλιοθήκη</span>
+        </button>
+
+        <button
+          type="button"
+          className={`bottom-tab ${
+            mainView === 'library' && activeShelf === 'favorites' ? 'active' : ''
+          }`}
+          onClick={() => handleSelectShelf('favorites')}
+        >
+          <HeartIcon size={20} filled={mainView === 'library' && activeShelf === 'favorites'} />
+          <span>Αγαπημένα</span>
+        </button>
+
+        <button
+          type="button"
+          className="bottom-tab-add"
+          onClick={() => {
+            setMainView('library');
+            setCreateTrigger((c) => c + 1);
+          }}
+          aria-label="Νέο Βιβλίο"
+        >
+          <PlusIcon size={22} />
+        </button>
+
+        <button
+          type="button"
+          className={`bottom-tab ${
+            mainView === 'library' && activeShelf === 'reviews' ? 'active' : ''
+          }`}
+          onClick={() => handleSelectShelf('reviews')}
+        >
+          <MessageIcon size={20} />
+          <span>Σχόλια</span>
+        </button>
+
+        <button
+          type="button"
+          className={`bottom-tab ${mainView === 'community' ? 'active' : ''}`}
+          onClick={() => setMainView('community')}
+        >
+          <UsersIcon size={20} />
+          <span>Κοινότητα</span>
+        </button>
+      </nav>
     </div>
   );
 }
