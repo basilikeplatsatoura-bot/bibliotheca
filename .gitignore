@@ -1,0 +1,21 @@
+# SQLite databases
+*.db
+*.database
+*.sqlite
+*.sqlite3
+
+# Binaries & tools
+*.exe
+library-api
+
+# Frontend
+library-ui/node_modules/
+library-ui/dist/
+library-ui/.env
+library-ui/.env.local
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

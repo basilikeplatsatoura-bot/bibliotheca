@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"library-api/db"
 	"library-api/handlers"
+	"os"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -12,38 +13,46 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-var err error
-
 func main() {
-	fmt.Println("Library-Api")
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "library.db"
+	}
 
-	handlers.Database, err = sql.Open("sqlite", "library.database")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "5005"
+	}
+
+	var err error
+	handlers.Database, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		fmt.Println("failed to open database:", err)
 		return
 	}
 	defer handlers.Database.Close()
 
-	err = db.Initdb(handlers.Database)
-	if err != nil {
+	if err = db.Initdb(handlers.Database); err != nil {
 		fmt.Println("failed to initialize database:", err)
 		return
 	}
 
 	router := gin.Default()
-	router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins: true,
+		AllowMethods:    []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:    []string{"Origin", "Content-Type", "Accept"},
+	}))
 
-	// --- Routes Βιβλίων ---
+	// --- Routes Ηλεκτρονικής Βιβλιοθήκης ---
 	router.GET("/api/books", handlers.BooksHandlers)
 	router.POST("/api/books", handlers.AddBookHandler)
 	router.PUT("/api/books/:id", handlers.UpdateBookHandler)
 	router.DELETE("/api/books/:id", handlers.DeleteBookHandler)
-	router.POST("/api/books/:id/borrow", handlers.BorrowHandlers)
+	router.GET("/api/categories", handlers.CategoriesHandler)
 
-	// --- Routes Δανεισμών ---
-	router.GET("/api/loans", handlers.LoansHandlers)
-	router.POST("/api/loans/:loanId/return", handlers.ReturnHandlers)
-
-	fmt.Println("Database connected successfully! Server running on :5005")
-	router.Run(":5005")
+	fmt.Printf("Database connected (%s)! Server running on :%s\n", dbPath, port)
+	if err := router.Run(":" + port); err != nil {
+		fmt.Println("server error:", err)
+	}
 }

@@ -2,43 +2,23 @@ package db
 
 import (
 	"database/sql"
-	"fmt"
+	"errors"
 	"library-api/models"
+	"strings"
 )
 
-func AddBook(db *sql.DB, title string, author string, totalCopies int) error {
-	query := `INSERT INTO books (title, author, total_copies) VALUES (?, ?, ?)`
-	_, err := db.Exec(query, title, author, totalCopies)
-	if err != nil {
-		return err
-	}
-	return nil
-}
+var (
+	ErrBookNotFound = errors.New("το βιβλίο δεν βρέθηκε")
+)
 
-func GetBooks(db *sql.DB) ([]models.Book, error) {
-	query := `SELECT * FROM books`
-	rows, err := db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var books []models.Book
-
-	for rows.Next() {
-		var book models.Book
-		if err := rows.Scan(&book.Id, &book.Title, &book.Author, &book.Total_copies); err != nil {
-			return nil, err
-		}
-		books = append(books, book)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return books, nil
-}
+const (
+	CatWorldLit    = "Παγκόσμια Λογοτεχνία"
+	CatGreekLit    = "Ελληνική Λογοτεχνία"
+	CatPoetry      = "Ποίηση"
+	CatPhilosophy  = "Φιλοσοφία & Ψυχολογία"
+	CatPolitics    = "Πολιτική & Ιστορία"
+	CatUnderground = "Underground & Beat"
+)
 
 func Initdb(database *sql.DB) error {
 	createBooks := `
@@ -46,183 +26,391 @@ func Initdb(database *sql.DB) error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			title TEXT NOT NULL,
 			author TEXT NOT NULL,
-			total_copies INTEGER NOT NULL
+			total_copies INTEGER NOT NULL DEFAULT 1,
+			cover_url TEXT NOT NULL DEFAULT '',
+			category TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT 'want_to_read',
+			rating INTEGER NOT NULL DEFAULT 0,
+			is_favorite INTEGER NOT NULL DEFAULT 0,
+			notes TEXT NOT NULL DEFAULT ''
 		);`
-	_, err := database.Exec(createBooks)
-	if err != nil {
+	if _, err := database.Exec(createBooks); err != nil {
 		return err
 	}
 
-	createLoans := `
-		CREATE TABLE IF NOT EXISTS loans (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			user_name TEXT NOT NULL,
-			book_id INTEGER NOT NULL,
-			borrowed_at DATETIME NOT NULL,
-			returned_at DATETIME
-		);`
-	_, err = database.Exec(createLoans)
-	if err != nil {
-		return err
+	// Safe migrations for existing databases
+	migrations := []struct {
+		column string
+		def    string
+	}{
+		{"cover_url", "TEXT NOT NULL DEFAULT ''"},
+		{"category", "TEXT NOT NULL DEFAULT ''"},
+		{"status", "TEXT NOT NULL DEFAULT 'want_to_read'"},
+		{"rating", "INTEGER NOT NULL DEFAULT 0"},
+		{"is_favorite", "INTEGER NOT NULL DEFAULT 0"},
+		{"notes", "TEXT NOT NULL DEFAULT ''"},
 	}
 
+	for _, m := range migrations {
+		if err := ensureColumn(database, "books", m.column, m.def); err != nil {
+			return err
+		}
+	}
+
+	// Seed default books if empty
 	var count int
-	err = database.QueryRow("SELECT COUNT(*) FROM books").Scan(&count)
-	if err != nil {
+	if err := database.QueryRow("SELECT COUNT(*) FROM books").Scan(&count); err != nil {
 		return err
 	}
-
 	if count == 0 {
-		_, err = database.Exec(`
-		INSERT INTO books (title, author, total_copies)
+		_, err := database.Exec(`
+		INSERT INTO books (title, author, category, status, rating, is_favorite, notes, cover_url)
 		VALUES
-		('Post Office', 'Charles Bukowski', 5),
-		('Foco d''amor', 'Vasilis Vasilikos', 3),
-		('Madame Bovary', 'Gustave Flaubert', 2),
-		('Η αγάπη άργησε μια μέρα', 'Λιλή Ζωγράφου', 3),
-		('The Dispossessed', 'Ursula K. Le Guin', 4),
-		('Πως δένεται το ατσάλι', 'Nikolai Alekseevich Ostrovsky', 2);
-	`)
+		('Post Office', 'Charles Bukowski', ?, 'read', 5, 1, 'Ωμό, αστείο και αφοπλιστικά ειλικρινές.', 'https://covers.openlibrary.org/b/id/8231996-L.jpg'),
+		('Foco d''amor', 'Vasilis Vasilikos', ?, 'want_to_read', 0, 0, '', ''),
+		('Madame Bovary', 'Gustave Flaubert', ?, 'read', 4, 0, '', 'https://covers.openlibrary.org/b/id/8231856-L.jpg'),
+		('Η αγάπη άργησε μια μέρα', 'Λιλή Ζωγράφου', ?, 'read', 5, 1, '', ''),
+		('The Dispossessed', 'Ursula K. Le Guin', ?, 'reading', 5, 1, '', 'https://covers.openlibrary.org/b/id/8225261-L.jpg'),
+		('Πώς δένεται το ατσάλι', 'Νικολάι Οστρόβσκι', ?, 'want_to_read', 0, 0, '', '');
+		`, CatUnderground, CatGreekLit, CatWorldLit, CatGreekLit, CatWorldLit, CatWorldLit)
 		if err != nil {
 			return err
 		}
 	}
 
+	// Auto-categorize any existing books that have an empty category
+	if err := autoCategorizeExisting(database); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func BorrowBook(db *sql.DB, userName string, bookID int) error {
-	var totalCopies int
+func ensureColumn(database *sql.DB, table, column, definition string) error {
+	rows, err := database.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 
-	err := db.QueryRow(`
-		SELECT total_copies
+	exists := false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			exists = true
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	if !exists {
+		_, err := database.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + definition)
+		return err
+	}
+	return nil
+}
+
+func inferCategory(title, author string) string {
+	text := strings.ToLower(title + " " + author)
+
+	// Ποίηση
+	poetryKeys := []string{"γώγου", "πολυδούρη", "neruda", "hikmet", "ποιήματα", "σονέτα", "canto general", "θεία κωμωδία", "δάντης"}
+	for _, k := range poetryKeys {
+		if strings.Contains(text, k) {
+			return CatPoetry
+		}
+	}
+
+	// Underground & Beat
+	undergroundKeys := []string{"bukowski", "άσιμος", "σιδηρόπουλος", "pessoa", "limonov"}
+	for _, k := range undergroundKeys {
+		if strings.Contains(text, k) {
+			return CatUnderground
+		}
+	}
+
+	// Πολιτική & Ιστορία
+	politicsKeys := []string{"bakunin", "kropotkin", "malatesta", "marx", "nettlau", "nechayev", "κουφοντίνας", "αναρχί", "επαναστάτη", "ταξικό πόλεμο", "μπρυμαίρ"}
+	for _, k := range politicsKeys {
+		if strings.Contains(text, k) {
+			return CatPolitics
+		}
+	}
+
+	// Φιλοσοφία & Ψυχολογία
+	philosophyKeys := []string{"nietzsche", "ζαρατούστρα", "freud", "ψυχανάλυση", "eco", "σημειολογία", "αυρήλιος", "εις εαυτόν", "marcuse", "ουτοπίας"}
+	for _, k := range philosophyKeys {
+		if strings.Contains(text, k) {
+			return CatPhilosophy
+		}
+	}
+
+	// Ελληνική Λογοτεχνία
+	greekKeys := []string{"βασιλικός", "vasilikos", "ταχτσής", "ζωγράφου", "σαμαράκης", "βαμβουνάκη", "δούκα", "κάραλη", "παπαδοπούλου", "αρμαπάτζογλου"}
+	for _, k := range greekKeys {
+		if strings.Contains(text, k) {
+			return CatGreekLit
+		}
+	}
+
+	return CatWorldLit
+}
+
+func autoCategorizeExisting(database *sql.DB) error {
+	rows, err := database.Query(`SELECT id, title, author FROM books WHERE category = '' OR category IS NULL`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type rowItem struct {
+		id     int
+		title  string
+		author string
+	}
+	var items []rowItem
+	for rows.Next() {
+		var it rowItem
+		if err := rows.Scan(&it.id, &it.title, &it.author); err != nil {
+			return err
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, it := range items {
+		cat := inferCategory(it.title, it.author)
+		if _, err := database.Exec(`UPDATE books SET category = ? WHERE id = ?`, cat, it.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case "reading", "read", "want_to_read":
+		return strings.TrimSpace(status)
+	default:
+		return "want_to_read"
+	}
+}
+
+func clampRating(rating int) int {
+	if rating < 0 {
+		return 0
+	}
+	if rating > 5 {
+		return 5
+	}
+	return rating
+}
+
+func AddBook(database *sql.DB, book models.Book) (models.Book, error) {
+	category := strings.TrimSpace(book.Category)
+	if category == "" {
+		category = inferCategory(book.Title, book.Author)
+	}
+	status := normalizeStatus(book.Status)
+	rating := clampRating(book.Rating)
+	favInt := 0
+	if book.IsFavorite {
+		favInt = 1
+	}
+
+	query := `
+		INSERT INTO books (title, author, total_copies, cover_url, category, status, rating, is_favorite, notes)
+		VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+	`
+	result, err := database.Exec(
+		query,
+		book.Title,
+		book.Author,
+		book.CoverURL,
+		category,
+		status,
+		rating,
+		favInt,
+		book.Notes,
+	)
+	if err != nil {
+		return models.Book{}, err
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return models.Book{}, err
+	}
+
+	book.ID = int(id)
+	book.Category = category
+	book.Status = status
+	book.Rating = rating
+	return book, nil
+}
+
+func GetBooks(database *sql.DB, search, category, status string, favoriteOnly bool) ([]models.Book, error) {
+	query := `
+		SELECT id, title, author, category, status, rating, is_favorite, notes, cover_url
 		FROM books
-		WHERE id = ?
-	`, bookID).Scan(&totalCopies)
+		WHERE 1=1
+	`
+	var args []any
 
-	if err != nil {
-		return err
+	if trimmed := strings.TrimSpace(search); trimmed != "" {
+		like := "%" + trimmed + "%"
+		query += ` AND (LOWER(title) LIKE LOWER(?) OR LOWER(author) LIKE LOWER(?) OR LOWER(notes) LIKE LOWER(?))`
+		args = append(args, like, like, like)
+	}
+	if trimmedCat := strings.TrimSpace(category); trimmedCat != "" {
+		query += ` AND category = ?`
+		args = append(args, trimmedCat)
+	}
+	if trimmedStatus := strings.TrimSpace(status); trimmedStatus != "" {
+		query += ` AND status = ?`
+		args = append(args, trimmedStatus)
+	}
+	if favoriteOnly {
+		query += ` AND is_favorite = 1`
 	}
 
-	var borrowedCopies int
+	query += ` ORDER BY id DESC`
 
-	err = db.QueryRow(`
-		SELECT COUNT(*)
-		FROM loans
-		WHERE book_id = ? AND returned_at IS NULL
-	`, bookID).Scan(&borrowedCopies)
-
-	if err != nil {
-		return err
-	}
-
-	if borrowedCopies >= totalCopies {
-		return fmt.Errorf("δεν υπάρχουν διαθέσιμα αντίτυπα")
-	}
-
-	_, err = db.Exec(`
-		INSERT INTO loans (user_name, book_id, borrowed_at)
-		VALUES (?, ?, CURRENT_TIMESTAMP)
-	`, userName, bookID)
-
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func ReturnBook(db *sql.DB, loanID int, userName string) error {
-	result, err := db.Exec(`
-		UPDATE loans
-		SET returned_at = CURRENT_TIMESTAMP
-		WHERE id = ?
-		AND user_name = ?
-		AND returned_at IS NULL
-	`, loanID, userName)
-	if err != nil {
-		return err
-	}
-	rows, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("δεν βρέθηκε ενεργός δανεισμός")
-	}
-	return nil
-}
-
-func GetLoans(db *sql.DB, userName string) ([]models.Loan, error) {
-	var query string
-	var rows *sql.Rows
-	var err error
-
-	if userName != "" {
-		query = `
-		SELECT l.id, l.user_name, l.book_id, b.title, l.borrowed_at, l.returned_at
-		FROM loans l
-		JOIN books b ON l.book_id = b.id
-		WHERE l.user_name = ?
-		ORDER BY (l.returned_at IS NOT NULL) ASC, l.borrowed_at DESC
-		`
-		rows, err = db.Query(query, userName)
-	} else {
-		query = `
-		SELECT l.id, l.user_name, l.book_id, b.title, l.borrowed_at, l.returned_at
-		FROM loans l
-		JOIN books b ON l.book_id = b.id
-		ORDER BY (l.returned_at IS NOT NULL) ASC, l.borrowed_at DESC
-		`
-		rows, err = db.Query(query)
-	}
+	rows, err := database.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var loans []models.Loan
+	books := make([]models.Book, 0)
 	for rows.Next() {
-		var loan models.Loan
-		var returnedAt sql.NullString
-		var title string
-		if err := rows.Scan(&loan.Id, &loan.UserName, &loan.BookId, &title, &loan.BorrowedAt, &returnedAt); err != nil {
+		var b models.Book
+		var favInt int
+		if err := rows.Scan(
+			&b.ID,
+			&b.Title,
+			&b.Author,
+			&b.Category,
+			&b.Status,
+			&b.Rating,
+			&favInt,
+			&b.Notes,
+			&b.CoverURL,
+		); err != nil {
 			return nil, err
 		}
-		if returnedAt.Valid {
-			loan.ReturnedAt = &returnedAt.String
+		b.IsFavorite = favInt == 1
+		if b.Category == "" {
+			b.Category = CatWorldLit
 		}
-		loans = append(loans, loan)
+		b.Status = normalizeStatus(b.Status)
+		books = append(books, b)
 	}
-	return loans, nil
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return books, nil
 }
 
-func UpdateBook(db *sql.DB, id int, title string, author string, Total_copies int) error {
-	query := `UPDATE books SET title = ?, author = ?, total_copies = ? WHERE id = ?`
-	result, err := db.Exec(query, title, author, Total_copies, id)
+func UpdateBook(database *sql.DB, id int, book models.Book) (models.Book, error) {
+	category := strings.TrimSpace(book.Category)
+	if category == "" {
+		category = inferCategory(book.Title, book.Author)
+	}
+	status := normalizeStatus(book.Status)
+	rating := clampRating(book.Rating)
+	favInt := 0
+	if book.IsFavorite {
+		favInt = 1
+	}
+
+	query := `
+		UPDATE books
+		SET title = ?, author = ?, category = ?, status = ?, rating = ?, is_favorite = ?, notes = ?, cover_url = ?
+		WHERE id = ?
+	`
+	result, err := database.Exec(
+		query,
+		book.Title,
+		book.Author,
+		category,
+		status,
+		rating,
+		favInt,
+		book.Notes,
+		book.CoverURL,
+		id,
+	)
+	if err != nil {
+		return models.Book{}, err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return models.Book{}, err
+	}
+	if rowsAffected == 0 {
+		return models.Book{}, ErrBookNotFound
+	}
+
+	book.ID = id
+	book.Category = category
+	book.Status = status
+	book.Rating = rating
+	return book, nil
+}
+
+func DeleteBook(database *sql.DB, id int) error {
+	result, err := database.Exec(`DELETE FROM books WHERE id = ?`, id)
 	if err != nil {
 		return err
 	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("book not found")
-	}
-
-	return nil
-}
-
-func DeleteBook(db *sql.DB, id int) error {
-	query := `DELETE FROM books WHERE id = ?`
-	result, err := db.Exec(query, id)
+	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
-
-	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("book with id %d not found", id)
+		return ErrBookNotFound
 	}
-
 	return nil
+}
+
+func GetCategories(database *sql.DB) ([]models.CategoryCount, error) {
+	rows, err := database.Query(`
+		SELECT category, COUNT(*) as cnt
+		FROM books
+		WHERE category != ''
+		GROUP BY category
+		ORDER BY cnt DESC, category ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	categories := make([]models.CategoryCount, 0)
+	for rows.Next() {
+		var c models.CategoryCount
+		if err := rows.Scan(&c.Name, &c.Count); err != nil {
+			return nil, err
+		}
+		categories = append(categories, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return categories, nil
 }

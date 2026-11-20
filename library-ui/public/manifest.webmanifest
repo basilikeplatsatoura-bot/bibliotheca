@@ -1,0 +1,30 @@
+{
+  "name": "Bibliotheca — Προσωπική Βιβλιοθήκη",
+  "short_name": "Bibliotheca",
+  "description": "Η προσωπική μου ηλεκτρονική βιβλιοθήκη με κατηγορίες, βαθμολογίες και σχόλια ανάγνωσης.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#001935",
+  "theme_color": "#001935",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
