@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import type { Book, BookPayload, BookStatus } from '../types';
 import { BOOK_CATEGORIES, STATUS_LABELS } from '../constants';
 import { POPULAR_BOOKS, type PopularBookSuggestion } from '../data/popularBooks';
-import { BookOpenIcon, CloseIcon, SearchIcon, StarIcon, TrashIcon } from './Icons';
+import { CloseIcon, StarIcon } from './Icons';
 
 interface BookModalProps {
   open: boolean;
@@ -34,52 +34,12 @@ async function searchOnlineSuggestions(query: string): Promise<PopularBookSugges
         title: item.trackName,
         author: item.artistName,
         category: BOOK_CATEGORIES[0],
-        cover_url: item.artworkUrl100
-          ? item.artworkUrl100.replace('100x100bb', '600x600bb')
-          : undefined,
       });
     }
     return results;
   } catch {
     return [];
   }
-}
-
-async function lookupBookCover(title: string, author: string): Promise<string | null> {
-  const term = `${title} ${author}`.trim();
-  if (!term) return null;
-
-  try {
-    const res = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=ebook&country=gr&limit=3`
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const item = data.results?.find((r: { artworkUrl100?: string }) => r.artworkUrl100);
-      if (item?.artworkUrl100) {
-        return item.artworkUrl100.replace('100x100bb', '600x600bb');
-      }
-    }
-  } catch {
-    // fallback
-  }
-
-  try {
-    const res = await fetch(
-      `https://openlibrary.org/search.json?q=${encodeURIComponent(term)}&limit=3&fields=cover_i`
-    );
-    if (res.ok) {
-      const data = await res.json();
-      const doc = data.docs?.find((d: { cover_i?: number }) => d.cover_i);
-      if (doc?.cover_i) {
-        return `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
-      }
-    }
-  } catch {
-    // ignore
-  }
-
-  return null;
 }
 
 export const BookModal: React.FC<BookModalProps> = ({
@@ -96,17 +56,13 @@ export const BookModal: React.FC<BookModalProps> = ({
   const [rating, setRating] = useState<number>(0);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
   const [notes, setNotes] = useState('');
-  const [coverUrl, setCoverUrl] = useState('');
-  const [searchingCover, setSearchingCover] = useState(false);
-  const [coverHint, setCoverHint] = useState<string | null>(null);
 
-  // Autocomplete suggestions state
+  // Autocomplete suggestions state (non-blocking inline box)
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [onlineSuggestions, setOnlineSuggestions] = useState<PopularBookSuggestion[]>([]);
   const [loadingOnline, setLoadingOnline] = useState(false);
 
   useEffect(() => {
-    setCoverHint(null);
     setShowSuggestions(false);
     setOnlineSuggestions([]);
     if (editingBook) {
@@ -117,7 +73,6 @@ export const BookModal: React.FC<BookModalProps> = ({
       setRating(editingBook.rating || 0);
       setIsFavorite(Boolean(editingBook.is_favorite));
       setNotes(editingBook.notes || '');
-      setCoverUrl(editingBook.cover_url || '');
     } else {
       setTitle('');
       setAuthor('');
@@ -126,7 +81,6 @@ export const BookModal: React.FC<BookModalProps> = ({
       setRating(0);
       setIsFavorite(false);
       setNotes('');
-      setCoverUrl('');
     }
   }, [editingBook, open]);
 
@@ -137,10 +91,10 @@ export const BookModal: React.FC<BookModalProps> = ({
     if (q.length < 2) return [];
     return POPULAR_BOOKS.filter(
       (b) => normalizeGreek(b.title).includes(q) || normalizeGreek(b.author).includes(q)
-    ).slice(0, 6);
+    ).slice(0, 5);
   }, [title, editingBook]);
 
-  // Live online suggestions (debounced) for millions of additional books
+  // Live online suggestions (debounced)
   useEffect(() => {
     if (!open || editingBook || !showSuggestions) return;
     const trimmed = title.trim();
@@ -168,7 +122,7 @@ export const BookModal: React.FC<BookModalProps> = ({
   // Merge local + online suggestions without duplicates
   const mergedSuggestions = useMemo(() => {
     const seen = new Set(localSuggestions.map((b) => normalizeGreek(b.title)));
-    const extra = onlineSuggestions.filter((b) => !seen.has(normalizeGreek(b.title))).slice(0, 4);
+    const extra = onlineSuggestions.filter((b) => !seen.has(normalizeGreek(b.title))).slice(0, 3);
     return [...localSuggestions, ...extra];
   }, [localSuggestions, onlineSuggestions]);
 
@@ -178,28 +132,7 @@ export const BookModal: React.FC<BookModalProps> = ({
     setTitle(item.title);
     setAuthor(item.author);
     if (item.category) setCategory(item.category);
-    if (item.cover_url) {
-      setCoverUrl(item.cover_url);
-      setCoverHint('Συμπληρώθηκε αυτόματα από τη βάση βιβλίων!');
-    }
     setShowSuggestions(false);
-  };
-
-  const handleAutoFindCover = async () => {
-    if (!title.trim()) {
-      setCoverHint('Συμπλήρωσε πρώτα τον τίτλο του βιβλίου.');
-      return;
-    }
-    setSearchingCover(true);
-    setCoverHint(null);
-    const found = await lookupBookCover(title.trim(), author.trim());
-    setSearchingCover(false);
-    if (found) {
-      setCoverUrl(found);
-      setCoverHint('Βρέθηκε πραγματικό εξώφυλλο!');
-    } else {
-      setCoverHint('Δεν βρέθηκε αυτόματα — μπορείς να επικολλήσεις URL ή να το αφήσεις κενό.');
-    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -213,7 +146,7 @@ export const BookModal: React.FC<BookModalProps> = ({
       rating,
       is_favorite: isFavorite,
       notes: notes.trim(),
-      cover_url: coverUrl.trim(),
+      cover_url: '',
     });
   };
 
@@ -230,15 +163,16 @@ export const BookModal: React.FC<BookModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="form-group autocomplete-wrap">
+          <div className="form-group">
             <label className="form-label" htmlFor="book-title">
-              Τίτλος Βιβλίου * {!editingBook && <span className="label-sub">(γράψε για προτάσεις)</span>}
+              Τίτλος Βιβλίου *{' '}
+              {!editingBook && <span className="label-sub">(γράψε δικό σου ή διάλεξε πρόταση)</span>}
             </label>
             <input
               id="book-title"
               type="text"
               className="input-field input-rect"
-              placeholder="π.χ. 1984, Έγκλημα και Τιμωρία, Καζαντζάκης..."
+              placeholder="π.χ. 1984, Έγκλημα και Τιμωρία ή όποιο βιβλίο θέλεις..."
               value={title}
               onChange={(e) => {
                 setTitle(e.target.value);
@@ -247,13 +181,28 @@ export const BookModal: React.FC<BookModalProps> = ({
               onFocus={() => {
                 if (!editingBook && title.trim().length >= 2) setShowSuggestions(true);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setShowSuggestions(false);
+              }}
               autoComplete="off"
               required
               autoFocus
             />
 
+            {/* Inline non-blocking suggestions panel (never overlaps Author field!) */}
             {!editingBook && showSuggestions && (mergedSuggestions.length > 0 || loadingOnline) && (
-              <div className="suggestions-dropdown" role="listbox">
+              <div className="suggestions-inline" role="listbox">
+                <div className="suggestions-inline-header">
+                  <span>Προτάσεις βιβλίων</span>
+                  <button
+                    type="button"
+                    className="suggestions-close-btn"
+                    onClick={() => setShowSuggestions(false)}
+                  >
+                    Συνέχεια με δικό μου ✕
+                  </button>
+                </div>
+
                 {mergedSuggestions.map((item, idx) => (
                   <button
                     key={`${item.title}-${item.author}-${idx}`}
@@ -261,13 +210,6 @@ export const BookModal: React.FC<BookModalProps> = ({
                     className="suggestion-item"
                     onClick={() => handleSelectSuggestion(item)}
                   >
-                    {item.cover_url ? (
-                      <img src={item.cover_url} alt="" className="suggestion-thumb" />
-                    ) : (
-                      <span className="suggestion-thumb suggestion-thumb-empty">
-                        <BookOpenIcon size={15} />
-                      </span>
-                    )}
                     <div className="suggestion-info">
                       <span className="suggestion-title">{item.title}</span>
                       <span className="suggestion-author">{item.author}</span>
@@ -292,6 +234,7 @@ export const BookModal: React.FC<BookModalProps> = ({
               className="input-field input-rect"
               placeholder="π.χ. Κώστας Ταχτσής"
               value={author}
+              onFocus={() => setShowSuggestions(false)}
               onChange={(e) => setAuthor(e.target.value)}
               required
             />
@@ -366,47 +309,6 @@ export const BookModal: React.FC<BookModalProps> = ({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
-          </div>
-
-          <div className="form-group">
-            <div className="label-row">
-              <label className="form-label" htmlFor="book-cover" style={{ marginBottom: 0 }}>
-                URL Εξωφύλλου (προαιρετικό)
-              </label>
-              <div style={{ display: 'flex', gap: '0.35rem' }}>
-                {coverUrl.trim() !== '' && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs btn-clear-danger"
-                    onClick={() => {
-                      setCoverUrl('');
-                      setCoverHint(null);
-                    }}
-                  >
-                    <TrashIcon size={12} />
-                    <span>Αφαίρεση</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs"
-                  onClick={handleAutoFindCover}
-                  disabled={searchingCover}
-                >
-                  <SearchIcon size={13} />
-                  <span>{searchingCover ? 'Αναζήτηση...' : 'Αυτόματη εύρεση'}</span>
-                </button>
-              </div>
-            </div>
-            <input
-              id="book-cover"
-              type="url"
-              className="input-field input-rect"
-              placeholder="https://..."
-              value={coverUrl}
-              onChange={(e) => setCoverUrl(e.target.value)}
-            />
-            {coverHint && <p className="field-hint">{coverHint}</p>}
           </div>
 
           <div className="modal-footer">

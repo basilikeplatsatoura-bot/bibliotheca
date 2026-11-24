@@ -7,7 +7,6 @@ import { BookDetailModal } from '../components/BookDetailModal';
 import { ConfirmModal } from '../components/ConfirmModal';
 import { STATUS_LABELS } from '../constants';
 import {
-  BookOpenIcon,
   EditIcon,
   GridIcon,
   HeartIcon,
@@ -452,18 +451,6 @@ export const Catalog: React.FC<CatalogProps> = ({
                 onClick={() => setSelectedBook(book)}
               >
                 <div className="review-card-top">
-                  {book.cover_url ? (
-                    <img
-                      src={book.cover_url}
-                      alt={book.title}
-                      className="review-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="review-cover review-cover-empty" aria-hidden="true">
-                      <BookOpenIcon size={22} />
-                    </div>
-                  )}
                   <div className="review-header-info">
                     <div className="review-badges">
                       <span className="book-cat-tag" style={{ marginBottom: 0 }}>
@@ -562,30 +549,16 @@ export const Catalog: React.FC<CatalogProps> = ({
             return (
               <article
                 key={book.id}
-                className="book-card clickable"
+                className="book-card book-card-clean clickable"
                 onClick={() => setSelectedBook(book)}
               >
-                <div className="book-cover-wrap">
-                  {book.cover_url ? (
-                    <img
-                      src={book.cover_url}
-                      alt={book.title}
-                      className="book-cover-img"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="book-cover-empty" aria-hidden="true">
-                      <BookOpenIcon size={28} />
-                      <span className="book-cover-empty-title">{book.title}</span>
-                      <span className="book-cover-empty-author">{book.author}</span>
-                    </div>
-                  )}
-                  <span className={`status-badge-overlay status-${book.status}`}>
+                <div className="book-card-topbar">
+                  <span className={`status-chip status-chip-${book.status}`}>
                     {STATUS_LABELS[book.status]}
                   </span>
                   <button
                     type="button"
-                    className={`fav-float-btn ${book.is_favorite ? 'active' : ''}`}
+                    className={`fav-inline-btn ${book.is_favorite ? 'active' : ''}`}
                     onClick={(e) => handleToggleFavorite(e, book)}
                     title={book.is_favorite ? 'Αφαίρεση από αγαπημένα' : 'Αγαπημένο'}
                     aria-label="Αγαπημένο"
@@ -669,18 +642,6 @@ export const Catalog: React.FC<CatalogProps> = ({
                 className="book-row clickable"
                 onClick={() => setSelectedBook(book)}
               >
-                {book.cover_url ? (
-                  <img
-                    src={book.cover_url}
-                    alt={book.title}
-                    className="book-row-thumb"
-                    loading="lazy"
-                  />
-                ) : (
-                  <div className="book-row-thumb book-row-thumb-empty" aria-hidden="true">
-                    <BookOpenIcon size={18} />
-                  </div>
-                )}
                 <div className="book-row-info">
                   <div className="book-row-title">{book.title}</div>
                   <div className="book-row-author">

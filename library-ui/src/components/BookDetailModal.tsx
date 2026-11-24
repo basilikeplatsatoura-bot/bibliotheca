@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Book, BookPayload, BookStatus } from '../types';
 import { STATUS_LABELS } from '../constants';
-import { BookOpenIcon, CloseIcon, EditIcon, HeartIcon, StarIcon, TrashIcon } from './Icons';
+import { CloseIcon, EditIcon, HeartIcon, StarIcon, TrashIcon } from './Icons';
 
 interface BookDetailModalProps {
   book: Book | null;
@@ -24,7 +24,6 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
   const [rating, setRating] = useState<number>(0);
   const [isFavorite, setIsFavorite] = useState<boolean>(false);
   const [notes, setNotes] = useState<string>('');
-  const [coverUrl, setCoverUrl] = useState<string>('');
 
   useEffect(() => {
     if (book) {
@@ -32,7 +31,6 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
       setRating(book.rating || 0);
       setIsFavorite(Boolean(book.is_favorite));
       setNotes(book.notes || '');
-      setCoverUrl(book.cover_url || '');
     }
   }, [book]);
 
@@ -42,8 +40,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
     status !== book.status ||
     rating !== book.rating ||
     isFavorite !== book.is_favorite ||
-    notes.trim() !== (book.notes || '').trim() ||
-    coverUrl !== (book.cover_url || '');
+    notes.trim() !== (book.notes || '').trim();
 
   const handleSave = async () => {
     await onSaveQuickUpdate(book.id, {
@@ -54,7 +51,7 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
       rating,
       is_favorite: isFavorite,
       notes: notes.trim(),
-      cover_url: coverUrl,
+      cover_url: '',
     });
   };
 
@@ -103,83 +100,54 @@ export const BookDetailModal: React.FC<BookDetailModalProps> = ({
           </div>
         </div>
 
-        <div className="detail-hero">
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
-            <div className="detail-cover-wrap">
-              {coverUrl ? (
-                <img
-                  src={coverUrl}
-                  alt={book.title}
-                  className="detail-cover-img"
-                />
-              ) : (
-                <div className="book-cover-empty detail-cover-empty" aria-hidden="true">
-                  <BookOpenIcon size={28} />
-                  <span className="book-cover-empty-title">{book.title}</span>
-                </div>
-              )}
+        <div className="detail-meta">
+          <h2 className="detail-title">{book.title}</h2>
+          <p className="detail-author">{book.author}</p>
+
+          <div className="form-group" style={{ marginTop: '1.15rem' }}>
+            <span className="form-label">Ράφι Ανάγνωσης</span>
+            <div className="status-pills-row">
+              {(Object.keys(STATUS_LABELS) as BookStatus[]).map((key) => (
+                <button
+                  key={key}
+                  type="button"
+                  className={`status-toggle-btn ${status === key ? 'active' : ''}`}
+                  onClick={() => setStatus(key)}
+                >
+                  {STATUS_LABELS[key]}
+                </button>
+              ))}
             </div>
-            {coverUrl && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-xs btn-clear-danger"
-                onClick={() => setCoverUrl('')}
-              >
-                <TrashIcon size={12} />
-                <span>Αφαίρεση εξωφύλλου</span>
-              </button>
-            )}
           </div>
 
-          <div className="detail-meta">
-            <h2 className="detail-title">{book.title}</h2>
-            <p className="detail-author">{book.author}</p>
-
-            <div className="form-group" style={{ marginTop: '1rem' }}>
-              <span className="form-label">Ράφι Ανάγνωσης</span>
-              <div className="status-pills-row">
-                {(Object.keys(STATUS_LABELS) as BookStatus[]).map((key) => (
-                  <button
-                    key={key}
-                    type="button"
-                    className={`status-toggle-btn ${status === key ? 'active' : ''}`}
-                    onClick={() => setStatus(key)}
-                  >
-                    {STATUS_LABELS[key]}
-                  </button>
-                ))}
-              </div>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <div className="label-row">
+              <span className="form-label" style={{ marginBottom: 0 }}>Η Βαθμολογία μου</span>
+              {rating > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs btn-clear-danger"
+                  onClick={() => setRating(0)}
+                >
+                  Σβήσιμο βαθμολογίας
+                </button>
+              )}
             </div>
-
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <div className="label-row">
-                <span className="form-label" style={{ marginBottom: 0 }}>Η Βαθμολογία μου</span>
-                {rating > 0 && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-xs btn-clear-danger"
-                    onClick={() => setRating(0)}
-                  >
-                    Σβήσιμο βαθμολογίας
-                  </button>
-                )}
-              </div>
-              <div className="star-picker">
-                {[1, 2, 3, 4, 5].map((star) => (
-                  <button
-                    key={star}
-                    type="button"
-                    className={`star-btn ${star <= rating ? 'active' : ''}`}
-                    onClick={() => setRating(rating === star ? 0 : star)}
-                    aria-label={`${star} αστέρια`}
-                  >
-                    <StarIcon size={22} filled={star <= rating} />
-                  </button>
-                ))}
-                <span className="star-label">
-                  {rating > 0 ? `${rating} / 5` : 'Χωρίς βαθμολογία'}
-                </span>
-              </div>
+            <div className="star-picker">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  className={`star-btn ${star <= rating ? 'active' : ''}`}
+                  onClick={() => setRating(rating === star ? 0 : star)}
+                  aria-label={`${star} αστέρια`}
+                >
+                  <StarIcon size={22} filled={star <= rating} />
+                </button>
+              ))}
+              <span className="star-label">
+                {rating > 0 ? `${rating} / 5` : 'Χωρίς βαθμολογία'}
+              </span>
             </div>
           </div>
         </div>

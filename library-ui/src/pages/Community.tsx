@@ -4,7 +4,6 @@ import type { Book, Profile } from '../types';
 import { STATUS_LABELS } from '../constants';
 import {
   ArrowLeftIcon,
-  BookOpenIcon,
   MessageIcon,
   PlusIcon,
   SearchIcon,
@@ -161,13 +160,6 @@ export const Community: React.FC<CommunityProps> = ({
             {viewingBooks.map((book) => (
               <article key={book.id} className="review-card">
                 <div className="review-card-top">
-                  {book.cover_url ? (
-                    <img src={book.cover_url} alt={book.title} className="review-cover" loading="lazy" />
-                  ) : (
-                    <div className="review-cover review-cover-empty" aria-hidden="true">
-                      <BookOpenIcon size={22} />
-                    </div>
-                  )}
                   <div className="review-header-info">
                     <div className="review-badges">
                       <span className="book-cat-tag" style={{ marginBottom: 0 }}>
@@ -307,13 +299,6 @@ export const Community: React.FC<CommunityProps> = ({
                   )}
 
                   <div className="review-card-top">
-                    {book.cover_url ? (
-                      <img src={book.cover_url} alt={book.title} className="review-cover" loading="lazy" />
-                    ) : (
-                      <div className="review-cover review-cover-empty" aria-hidden="true">
-                        <BookOpenIcon size={22} />
-                      </div>
-                    )}
                     <div className="review-header-info">
                       <span className="book-cat-tag">{book.category}</span>
                       <h3 className="review-title">{book.title}</h3>
